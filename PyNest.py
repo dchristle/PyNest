@@ -31,7 +31,8 @@ def draw_mcmc(livepoints, cholmat, logLmin,
         p_ub = 10
         p_lb = 0
         currentPrior = -numpy.log(p_ub - p_lb)
-        # In fact, let's just write out the code relying on lambda.
+        # In fact, let's just write out the code relying on lambda. This 'prior'
+        # function should actually return the natural logarithm of the prior.
         currentPrior = prior(sample)
 
         for i in range(0,Nmcmc-1):
@@ -87,6 +88,13 @@ def draw_mcmc(livepoints, cholmat, logLmin,
                     # else it just leaves the sample dimension alone
 
             # check if sample is within prior boundaries
+            sampletmp = reflectbounds(sampletemp, par_range)
+            newPrior = prior(sampletmp)
+            # Now implement the Metropolis-Hastings rejection step, to keep
+            # the random walk Markovian
+            if numpy.log(numpy.random.rand(1)) > newPrior - currentPrior: # reject point
+                continue # look up continue syntax
+
 
 
     return (sample, logL)
@@ -103,8 +111,9 @@ def reflectbounds(new, par_range):
     nyy = 2*maxn - y
     y = numpy.where(y < maxn, y, ny)
 
-    # Now double check if all elements are within bounds
-
+    # Now double check if all elements are within bounds.
+    # If not, just pick a random point from a uniform distribution encomparssing
+    # the bounds.
     ny = minn + numpy.random.rand(maxn.shape[0])*(maxn - minn)
     y = numpy.where(y > minn, y, ny)
     ny = minn + numpy.random.rand(maxn.shape[0])*(maxn - minn)

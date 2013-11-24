@@ -96,22 +96,21 @@ def reflectbounds(new, par_range):
     y = new.copy()
     minn = par_range[:,0]
     maxn = par_range[:,1]
-    ii = numpy.argwhere(y < minn)
-    print '%s is argwhere output' % ii
-    y[ii] = 2*minn[ii] - y[ii]
 
-    ii = numpy.argwhere(y > maxn)
-    y[ii] = 2*maxn[ii] - y[ii]
+    ny = 2*minn - y
+    y = numpy.where(y > minn, y, ny)
+
+    nyy = 2*maxn - y
+    y = numpy.where(y < maxn, y, ny)
 
     # Now double check if all elements are within bounds
-    ii = numpy.argwhere(y < minn)
-    y[ii] = minn[ii] + numpy.random.rand(1)*(maxn[ii] - minn[ii])
-    ii = numpy.argwhere(y > maxn)
-    y[ii] = minn[ii] + numpy.random.rand(1)*(maxn[ii] - minn[ii])
+
+    ny = minn + numpy.random.rand(maxn.shape[0])*(maxn - minn)
+    y = numpy.where(y > minn, y, ny)
+    ny = minn + numpy.random.rand(maxn.shape[0])*(maxn - minn)
+    y = numpy.where(y < maxn, y, ny)
     return y
 
-
-    return
 
 
 def logplus(logx, logy):

@@ -426,22 +426,34 @@ def mchol(G):
 
     # loop through, calculating column j of L for j = 0:n-1
 
-    L = numpy.zeros((n,n))
-    D = numpy.zeros((n,n))
-    E = numpy.zeros((n,n))
+    L = numpy.zeros((n,n),float)
+    D = numpy.zeros((n,n),float)
+    E = numpy.zeros((n,n),float)
     theta = numpy.zeros(n)
     for j in range(0,n-1):
-        bb = numpy.arange(0,j-1,1)
-        ee = numpy.arange(j,n,1)
+        bb = numpy.array(range(0,j-2+1),int)
+        ee = numpy.array(range(j,n-1+1),int)
+        print 'bb is %s' %bb
 
         # calculate the jth row of L
         if (j > 1):
-            L[j,bb] = numpy.divide(C[j,bb],numpy.diag(D[bb,bb])).T
+            aa = C[j,bb]
+            ab = numpy.diag(numpy.diag(D[bb,bb])).T
+            print 'aa is %s' % aa
+            print 'ab is %s' % ab
+            if j == 2:
+                L[j,bb] = numpy.divide(aa,ab)[0]
+            else:
+                print 'in %s' % L[j,bb]
+                print 'out %s' % numpy.divide(aa,ab).T
+                L[j,bb] = numpy.divide(aa,ab)
 
         # update the jth column of C
         if (j >= 2):
             if j < n:
-                C[ee,j] = G[ee,j]-(L[j,bb]*C[ee,bb.T]).T
+                print 'in: %s' % C[ee,j]
+                print 'out: %s' % numpy.transpose(G[ee,j]-(L[j,bb]*numpy.transpose(C[ee,bb])))
+                C[ee,j] = numpy.transpose(G[ee,j]-(L[j,bb]*numpy.transpose(C[ee,bb])))
         else:
             C[ee,j] = G[ee,j]
 

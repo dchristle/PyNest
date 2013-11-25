@@ -9,6 +9,7 @@
 # Port started by David Christle <christle@uchicago.edu>, Nov. 2013
 
 import numpy
+import scipy
 
 def nested_sampler(data, Nlive, Nmcmc, tolerance, likelihood,
     prior, priordraw, D):
@@ -50,7 +51,7 @@ def nested_sampler(data, Nlive, Nmcmc, tolerance, likelihood,
     H = 0
 
     # initialize array of samples for posterior
-    nest_samples = numpy.zeros((1,D+1),float)
+    nest_samples = numpy.zeros((Nlive,D+1),float)
 
     # some initial values if MCMC nested sampling is used
     # value to scale down the covariance matrix -- can change if required
@@ -78,16 +79,18 @@ def nested_sampler(data, Nlive, Nmcmc, tolerance, likelihood,
 
         logLmin = numpy.min(logL)
         min_idx = numpy.argmin(logL)
-
+        print 'min idx = %s' % min_idx
         # set the sample to the minimum value
-        nest_samples[j,:] = numpy.concatenate(livepoints[min_idx,:], logLmin)
-
+        print '%s , log %s' % (livepoints[min_idx,:], logLmin)
+        print 'hstack %s' % numpy.append(livepoints[min_idx,:], logLmin)
+        nest_samples[j,:] = numpy.append(livepoints[min_idx,:], logLmin)
+        print 'hstack %s' % numpy.append(livepoints[min_idx,:], logLmin)
         # get the log weight (Wt = L*w)
         logWt = logLmin + logw
 
         # save old evidence and information
-        logZold = logZ.copy()
-        Hold = H.copy()
+        logZold = logZ
+        Hold = H
 
         # update evidence, information, and width
         logZ = logplus(logZ, logWt)
@@ -106,16 +109,17 @@ def nested_sampler(data, Nlive, Nmcmc, tolerance, likelihood,
                 # NOTE that for numbers of parameters >~10 covariances are often
                 # not positive definite and cholcov will have "problems".
                 # cholmat = cholcov(propscale*cov(livepoints) -- original code
-                cholmat = numpy.linalg.cholesky(propscale*numpy.cov(livepoints))
+                print 'np cov %s' % numpy.cov(livepoints)
+                #cholmat = numpy.linalg.cholesky(propscale*numpy.cov(livepoints))
                 # use modified Cholesky decomposition, which works even for
                 # matrices that are not quite positive definite from:
                 # http://infohost.nmt.edu/~borchers/ldlt.html
                 # (via http://stats.stackexchange.com/questions/6364
                 # /making-square-root-of-covariance-matrix-positive-definite-matlab
-                #cv = numpy.cov(livepoints)
-                #l, d = mchol(propscape*cv)
+                cv = numpy.cov(livepoints)
+                l, d = mchol(propscale*cv)
 
-                # cholmat = numpy.transpose(l)*matrix square root needed here(d)
+                cholmat = numpy.transpose(l)*scipy.linalg.sqrtm(d)
 
         # draw a new sample using mcmc algorithm
             point_draw, logL_draw = draw_mcmc(livepoints, cholmat, logLmin, \
@@ -356,3 +360,112 @@ def logplus(logx, logy):
 
 
     return logz
+
+
+# The following is originally from mchol.m, with the following copyright:
+#  [L,D,E,pneg]=mchol(G)
+#
+#  Given a symmetric matrix G, find a matrix E of "small" norm and c
+#  L, and D such that  G+E is Positive Definite, and
+#
+#      G+E = L*D*L'
+#
+#  Also, calculate a direction pneg, such that if G is not PD, then
+#
+#      pneg'*G*pneg < 0
+#
+#  Note that if G is PD, then the routine will return pneg=[].
+#
+#  Reference: Gill, Murray, and Wright, "Practical Optimization", p111.
+#  Author: Brian Borchers (borchers@nmt.edu)
+#
+#  Copyright (c) 2009, Brian Borchers
+#  All rights reserved.
+#
+#  Redistribution and use in source and binary forms, with or without
+#  modification, are permitted provided that the following conditions are
+#  met:
+#
+#    * Redistributions of source code must retain the above copyright
+#      notice, this list of conditions and the following disclaimer.
+#    * Redistributions in binary form must reproduce the above copyright
+#      notice, this list of conditions and the following disclaimer in
+#      the documentation and/or other materials provided with the distribution
+#    * Neither the name of the New Mexico Inst of Mining & Tech nor the names
+#      of its contributors may be used to endorse or promote products derived
+#      from this software without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
+#
+# I just ported this to Numpy below:
+
+def mchol(G):
+    # n gives the size of the matrix
+    n = G.shape[0]
+
+    # gamma, zi, nu, and beta2 are quantities used by the algorithm
+
+    gamma = numpy.max(numpy.diag(G))
+    zi = numpy.max(numpy.max(G-numpy.diag(numpy.diag(G)))) # what is this doing??
+    # I don't understand the double max usage
+    nu = numpy.max(numpy.array([1, numpy.sqrt(n*n-1)]))
+    beta2 = numpy.max(numpy.array([gamma, zi/nu, 1e-15]))
+
+    # initalize diag(C) to diag(G)
+    C = numpy.diag(numpy.diag(G))
+
+    # loop through, calculating column j of L for j = 0:n-1
+
+    L = numpy.zeros((n,n))
+    D = numpy.zeros((n,n))
+    E = numpy.zeros((n,n))
+    theta = numpy.zeros(n)
+    for j in range(0,n-1):
+        bb = numpy.arange(0,j-1,1)
+        ee = numpy.arange(j,n,1)
+
+        # calculate the jth row of L
+        if (j > 1):
+            L[j,bb] = numpy.divide(C[j,bb],numpy.diag(D[bb,bb])).T
+
+        # update the jth column of C
+        if (j >= 2):
+            if j < n:
+                C[ee,j] = G[ee,j]-(L[j,bb]*C[ee,bb.T]).T
+        else:
+            C[ee,j] = G[ee,j]
+
+        # update theta
+        if (j == n):
+            theta[j] = 0
+        else:
+            theta[j] = numpy.max(numpy.abs(C[ee,j]))
+
+        # update D
+        D[j,j] = numpy.max(numpy.array([1e-15, numpy.abs(C[j,j]), theta[j]*theta[j]/beta2]).T)
+
+        # update E
+
+        E[j,j] = D[j,j]-C[j,j]
+
+        # update C again, without M. Zibulevsky changes
+        for i in range(j,n-1):
+            C[i,i] = C[i,i] - C[i,j]*C[i,j]/D[j,j]
+
+        # put 1's on the diagonal of L
+        for i in range(0,n-1):
+            L[i,i] = 1
+    return (L, D)
+
+
+

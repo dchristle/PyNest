@@ -14,14 +14,13 @@ def main():
     t = numpy.arange(0,tlen+dt,dt)
 
     y = amp*numpy.sin(2*numpy.pi*f*t + phi)
-    data = numpy.concatenate((t,y.T),0)
-    print 'data shape %s' % data.shape
+    data = numpy.column_stack((t,y))
+    print 'data shape %d' % data.shape[1]
     tolerance = 0.1
 
 
     Nlive = 500
     Nmcmc = 20
-    print 'Shape of data is %s' % data
     PyNest.nested_sampler(data, Nlive, Nmcmc, tolerance, sin_likelihood, sin_prior_function, sin_pr_draw, 2)
 def sin_pr_draw(Npoints):
     output = numpy.random.rand(Npoints,2)
@@ -32,7 +31,10 @@ def sin_prior_function(x):
 
 def sin_likelihood(x, data):
     ll = 0
-    for i in range(0,data.shape[0]-1):
-        sinmodel = x[0]*numpy.sin(2*numpy.pi*24.788634*data[i,0] + x[1])
-        ll = ll + numpy.log(1/numpy.sqrt(2*pi*2)*numpy.exp(-numpy.power((data[i,1]-sin_model),2)*0.5/2.0))
+
+    for i in range(0,int(data.shape[0])-1):
+
+        sin_model = x[0]*numpy.sin(2*numpy.pi*24.788634*data[i,0] + x[1])
+        ll = ll + numpy.log(1/numpy.sqrt(2*numpy.pi*2)*numpy.exp(-numpy.power((data[i,1]-sin_model),2)*0.5/2.0))
+    return ll
 

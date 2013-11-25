@@ -149,9 +149,8 @@ def nested_sampler(data, Nlive, Nmcmc, tolerance, likelihood,
 
     # append the additional livepoints to the nested samples
     nest_samples = numpy.concatenate(nest_samples,numpy.concatenate(livepoints_sorted, logL_sorted))
-
-    post_samples = n
-
+    # really not sure if the below indexing even works correctly
+    post_samples = nest_samples[numpy.nonzero(logWt > logrand)]
 
     return (logZ, nest_samples, post_samples)
 

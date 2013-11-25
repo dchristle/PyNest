@@ -91,10 +91,50 @@ def draw_mcmc(livepoints, cholmat, logLmin,
             sampletmp = reflectbounds(sampletemp, par_range)
             newPrior = prior(sampletmp)
             # Now implement the Metropolis-Hastings rejection step, to keep
-            # the random walk Markovian
-            if numpy.log(numpy.random.rand(1)) > newPrior - currentPrior: # reject point
-                continue # look up continue syntax
+            # the random walk Markovian. This ensures that even though we use
+            # differential evolution or the t distribution to generate our
+            # proposal, the samples we generate are from a Markov chain whose
+            # stationary distribution is still the prior distribution.
 
+            if numpy.log(numpy.random.rand(1)) > newPrior - currentPrior: # reject point
+                # Continues to next iteration of the for loop. This is akin to
+                # rejecting the proposal we just made, because we left the
+                # proposal as 'sampletmp' and didn't set it to sample.
+                #
+                continue
+
+            # At this point, we have generated a proposal step according to the
+            # t distribution or DE, and rejected it/accepted it based on the M-H
+            # rule. If we stopped here, we would just generate a random walk of
+            # samples from the prior.
+
+            # We now add an additional step to reject the sample if it has
+            # a likelihood lesser than a critical value. That way, repeating
+            # this proposal + reject + reject will generate a random walk whose
+            # distribution converges to the prior distribution conditional on
+            # the likelihood being greater than a critical value.
+
+            #
+            # get the likelihood of the new sample
+
+            logLnew = likelihood(x, data);
+
+            # if logLnew is greater than logLmin accept point
+            if logLnew > logLmin:
+                acc = acc + 1
+                currentPrior = newPrior
+                sample = sampletmp
+                logL = logLnew
+
+        # Only break out of the while loop if at least one point is accepted,
+        # otherwise try again.
+        if acc > 0:
+            acctot = acc
+            break
+
+        acctot = acctot + acc
+        Ntimes = Ntimes + 1
+        # while loop ends here.
 
 
     return (sample, logL)

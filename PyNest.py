@@ -1,9 +1,182 @@
 # PyNest - a Python implementation of nested sampling, based on matlab multinest
+# originally implemented by Matthew Pitkin et al. This code mostly just ports
+# Pitkin's code directly, with a few modifications to the DE code. Right now,
+# the multinest based sampling actually is not implemented -- the only choice
+# is to evolve the samples in the prior distribution by the use of MCMC, with
+# a Student's t distribution and differential-evolution-based proposal
+# mechanism.
+#
+# Port started by David Christle <christle@uchicago.edu>, Nov. 2013
 
 import numpy
 
+def nested_sampler(data, Nlive, Nmcmc, tolerance, likelihood,
+    model, prior, priordraw, extraparams, D):
+    # Nmcmc cannot be zero, for this initial code, since we always use MCMC
+    # sampling and not the ellipse-based sampling, for the initial port of this
+    # code from Matlab Multinest. This is just simpler for now and faster to
+    # write if we omit features.
+
+    # Get the number of parameters from the prior array
+    D = prior.shape[0]
+
+    # Skip getting parameter names... not sure if that's useful for this code.
+
+    # Draw the set of initial live points from the prior
+
+    # This priordraw function is new versus the Pitkin implementation; trying
+    # to keep this general, as long as the user can write a function that
+    # does the job of sampling from the prior.
+
+    livepoints = priordraw(Nlive)
+
+    # calculate the log likelihood of all the live points
+    logL = numpy.zeros(Nlive)
+    for i in range(0,Nlive-1):
+        logL[i] = likelihood(Nlive[i])
+
+    # don't scale parameters - don't see the reason quite yet
+
+    # initial tolerance
+    tol = numpy.inf
+
+    # initial width of prior volume (from X_0 = 1 to X_1 = exp(-1/N))
+    logw = numpy.log(1 - numpy.exp(-1/Nlive))
+
+    # initial log evidence (Z=0)
+    logZ = -numpy.inf
+
+    # initial information
+    H = 0
+
+    # initialize array of samples for posterior
+    nest_samples = numpy.zeros((1,D+1),float)
+
+    # some initial values if MCMC nested sampling is used
+    # value to scale down the covariance matrix -- can change if required
+    propscale = 0.1
+
+    # some initial values if multinest sampling is used -- not currently
+    # implemented
+    h = 1.1 # h values from bottom of p. 1605 of Feroz and Hobson
+    FS = h # start FS at h, so ellipsoidal partitioning is done first time
+    K = 1 # start with one cluster of live points
+
+    # get maximum likleihood
+    logLmax = numpy.max(logL)
+
+    # initialize iteration counter
+    j = 1
+
+    # MAIN LOOP
+    while tol > tolerance or j <= Nlive:
+
+        # expected value of true remaining prior volume X
+        VS = numpy.exp(-j/Nlive)
+
+        # find maximum of likelihoods
+
+        logLmin = numpy.min(logL)
+        min_idx = numpy.argmin(logL)
+
+        # set the sample to the minimum value
+        nest_samples[j,:] = numpy.concatenate(livepoints[min_idx,:], logLmin)
+
+        # get the log weight (Wt = L*w)
+        logWt = logLmin + logw
+
+        # save old evidence and information
+        logZold = logZ.copy()
+        Hold = H.copy()
+
+        # update evidence, information, and width
+        logZ = logplus(logZ, logWt)
+        H = numpy.exp(logWt - logZ)*logLmin + \
+            numpy.exp(logZold - logZ)*(Hold + logZold) - logZ
+        # logw = logw - logt(Nlive) -- this comment leftover from Pitkin
+        logw = logw - 1/Nlive
+
+        if Nmcmc > 0:
+            # do MCMC nested sampling -- this is the only option implemented
+            # so far.
+
+            # get the Cholesky decomposed covariance of the live points
+            # (do every 100th iteration, can change this if required)
+            if j-1 % 100 == 0:
+                # NOTE that for numbers of parameters >~10 covariances are often
+                # not positive definite and cholcov will have "problems".
+                # cholmat = cholcov(propscale*cov(livepoints) -- original code
+                cholmat = numpy.linalg.cholesky(propscale*numpy.cov(livepoints))
+                # use modified Cholesky decomposition, which works even for
+                # matrices that are not quite positive definite from:
+                # http://infohost.nmt.edu/~borchers/ldlt.html
+                # (via http://stats.stackexchange.com/questions/6364
+                # /making-square-root-of-covariance-matrix-positive-definite-matlab
+                #cv = numpy.cov(livepoints)
+                #l, d = mchol(propscape*cv)
+
+                # cholmat = numpy.transpose(l)*matrix square root needed here(d)
+
+        # draw a new sample using mcmc algorithm
+            point_draw, logL_draw = draw_mcmc(livepoints, cholmat, logLmin, \
+                prior, prior_bounds, data, likelihood, Nmcmc)
+            livepoints[min_idx,:] = point_draw.copy()
+            logL[min_idx] = logL_draw.copy()
+
+        else:
+            print 'Nmcmc is not > 0 -- multinest sampling not implemented yet!'
+
+        # Now update maximum likelihood if appropriate
+        if logL(min_idx) > logLmax:
+            logLmax = logL[min_idx].copy()
+
+
+        # Work out tolerance for stopping criterion
+        tol = logplus(logZ, logLmax - (j/Nlive)) - logZ
+
+        # Display progress
+        print 'log(Z): %.5e, tol = %.5e, K = %d, iteration = %d' % (logZ, tol,
+            K, j)
+        # update counter
+        j = j+1
+    # Sort the remaining points (in order of likelihood) and add them on to the
+    # evidence
+    logL_sorted_args = numpy.argsort(logL)
+    livepoints_sorted = livepoints[logL_sorted_args,:]
+
+    for i in range(0,Nlive-1):
+        logZ = logplus(logZ, logL_sorted[i] + logw)
+
+    # append the additional livepoints to the nested samples
+    nest_samples = numpy.concatenate(nest_samples,numpy.concatenate(livepoints_sorted, logL_sorted))
+
+    post_samples = n
+
+
+    return (logZ, nest_samples, post_samples)
+
+def nest2pos(nest_samples, Nlive):
+    # Code originally by John Veitch (2009) and J. Romano (2012)
+    N = nest_samples.shape[0]
+    Ncol = nest_samples.shape[1]
+
+    # calulcate logWt = log(L*w) = logL + logw = logL - i/Nlive
+    logL = nest_samples[:,Ncol-1]
+    logw = -numpy.append(numpy.array(numpy.transpose(numpy.array(range(1,N-Nlive)))),
+        (N-Nlive)*numpy.ones((Nlive,1))/Nlive)
+    logWt = logL + logw
+
+    # posterior samples are given by the normalized weight
+    logWtmax = numpy.max(logWt)
+    logWt = logWt - logWtmax # Wt -> Wt/Wmax
+
+    # accept a nested sample as a posterior only if its value is > than a random
+    # number drawn from a uniform distribution
+    logrand = numpy.log(numpy.random.rand((N,1)))
+
+
 def draw_mcmc(livepoints, cholmat, logLmin,
-    prior, prior_bounds, data, likelihood, model, Nmcmc, parnames, extraparvals):
+    prior, prior_bounds, data, likelihood, Nmcmc):
 
     mcmcfrac = 0.9
     l2p = 0.5*log(2*numpy.pi) # useful constant

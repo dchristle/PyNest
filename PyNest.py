@@ -11,8 +11,8 @@
 import numpy
 import scipy
 
-def nested_sampler(data, Nlive, Nmcmc, tolerance, likelihood,
-    prior, priordraw, D):
+def nested_sampler(data, Nlive, maxIter, Nmcmc, tolerance, likelihood,
+    prior, priordraw, prior_bounds, D):
     # Nmcmc cannot be zero, for this initial code, since we always use MCMC
     # sampling and not the ellipse-based sampling, for the initial port of this
     # code from Matlab Multinest. This is just simpler for now and faster to
@@ -29,7 +29,7 @@ def nested_sampler(data, Nlive, Nmcmc, tolerance, likelihood,
     # to keep this general, as long as the user can write a function that
     # does the job of sampling from the prior.
 
-    livepoints = priordraw(Nlive)
+    livepoints = priordraw(Nlive,D)
 
     # calculate the log likelihood of all the live points
     logL = numpy.zeros(Nlive)
@@ -51,7 +51,7 @@ def nested_sampler(data, Nlive, Nmcmc, tolerance, likelihood,
     H = 0
 
     # initialize array of samples for posterior
-    nest_samples = numpy.zeros((Nlive,D+1),float)
+    nest_samples = numpy.zeros((maxIter,D+1),float)
 
     # some initial values if MCMC nested sampling is used
     # value to scale down the covariance matrix -- can change if required
@@ -70,7 +70,7 @@ def nested_sampler(data, Nlive, Nmcmc, tolerance, likelihood,
     j = 1
 
     # MAIN LOOP
-    while tol > tolerance or j <= Nlive:
+    while (tol > tolerance) or (j <= maxIter):
 
         # expected value of true remaining prior volume X
         VS = numpy.exp(-j/Nlive)
@@ -81,10 +81,9 @@ def nested_sampler(data, Nlive, Nmcmc, tolerance, likelihood,
         min_idx = numpy.argmin(logL)
         print 'min idx = %s' % min_idx
         # set the sample to the minimum value
-        print '%s , log %s' % (livepoints[min_idx,:], logLmin)
-        print 'hstack %s' % numpy.append(livepoints[min_idx,:], logLmin)
+        print 'sample minimum value is %s , log %s' % (livepoints[min_idx,:], logLmin)
+        print 'j is %s' % j
         nest_samples[j,:] = numpy.append(livepoints[min_idx,:], logLmin)
-        print 'hstack %s' % numpy.append(livepoints[min_idx,:], logLmin)
         # get the log weight (Wt = L*w)
         logWt = logLmin + logw
 
@@ -116,10 +115,15 @@ def nested_sampler(data, Nlive, Nmcmc, tolerance, likelihood,
                 # http://infohost.nmt.edu/~borchers/ldlt.html
                 # (via http://stats.stackexchange.com/questions/6364
                 # /making-square-root-of-covariance-matrix-positive-definite-matlab
-                cv = numpy.cov(livepoints)
-                l, d = mchol(propscale*cv)
+                cv = numpy.cov(livepoints.T)
+                print 'livepoints'
+                print livepoints.shape
+                print 'cv'
+                print cv.shape
+                l, indef, e = mchol(propscale*cv)
+                print l
 
-                cholmat = numpy.transpose(l)*scipy.linalg.sqrtm(d)
+                cholmat = l #numpy.transpose(l)*scipy.linalg.sqrtm(d)
 
         # draw a new sample using mcmc algorithm
             point_draw, logL_draw = draw_mcmc(livepoints, cholmat, logLmin, \
@@ -131,12 +135,19 @@ def nested_sampler(data, Nlive, Nmcmc, tolerance, likelihood,
             print 'Nmcmc is not > 0 -- multinest sampling not implemented yet!'
 
         # Now update maximum likelihood if appropriate
-        if logL(min_idx) > logLmax:
+        if logL[min_idx] > logLmax:
             logLmax = logL[min_idx].copy()
 
 
         # Work out tolerance for stopping criterion
+        # I don't understand this tolerance, so I commented it out:
         tol = logplus(logZ, logLmax - (j/Nlive)) - logZ
+
+        # Instead, let's do a basic tolerance that the last increment was below
+        # the value tol:
+        #tol = numpy.abs(logWt*2)
+
+
 
         # Display progress
         print 'log(Z): %.5e, tol = %.5e, K = %d, iteration = %d' % (logZ, tol,
@@ -182,7 +193,7 @@ def draw_mcmc(livepoints, cholmat, logLmin,
     prior, prior_bounds, data, likelihood, Nmcmc):
 
     mcmcfrac = 0.9
-    l2p = 0.5*log(2*numpy.pi) # useful constant
+    l2p = 0.5*numpy.log(2*numpy.pi) # useful constant
 
     Nlive = livepoints.shape[0]
     Npars = livepoints.shape[1]
@@ -197,8 +208,8 @@ def draw_mcmc(livepoints, cholmat, logLmin,
         acc = 0
 
         # get random point from live point array
-        sampidx = numpy.ceil(numpy.random.rand(1)*Nlive)
-        sample = livepoints[sampidx,:]
+        sampidx = numpy.ceil(numpy.random.rand(1)*(Nlive-1))
+        sample = livepoints[sampidx[0],:]
 
         # get the sample prior
         # replace this later -- it should compute the prior at the location of
@@ -215,7 +226,7 @@ def draw_mcmc(livepoints, cholmat, logLmin,
             if numpy.random.rand(1) < mcmcfrac: # use Student t proposal
                 # Draw points from multivariate Gaussian
                 gasdevs = numpy.random.randn(Npars)
-                sampletmp = (cholmat*gasdevs)
+                sampletmp = numpy.dot(cholmat,gasdevs)
 
                 # calculate chi-square distributed value
                 chi = numpy.sum(numpy.power(numpy.random.randn(Ndegs),2))
@@ -225,13 +236,13 @@ def draw_mcmc(livepoints, cholmat, logLmin,
             else: # use differential evolution
 
                 # first, select three random indices
-                idx1 = numpy.ceil(numpy.random.rand(1)*Nlive)
-                idx2 = numpy.ceil(numpy.random.rand(1)*Nlive)
-                idx3 = numpy.ceil(numpy.random.rand(1)*Nlive)
+                idx1 = numpy.ceil(numpy.random.rand(1)*(Nlive-1))[0]
+                idx2 = numpy.ceil(numpy.random.rand(1)*(Nlive-1))[0]
+                idx3 = numpy.ceil(numpy.random.rand(1)*(Nlive-1))[0]
 
                 # keep drawing to make sure it's distinct from sampidx
                 while idx1 == sampidx:
-                    idx1 = numpy.ceil(numpy.random.rand(1)*Nlive)
+                    idx1 = numpy.ceil(numpy.random.rand(1)*(Nlive-1))[0]
 
 
 
@@ -240,11 +251,11 @@ def draw_mcmc(livepoints, cholmat, logLmin,
                 # indices must be distinct. We also use three samples other
                 # than the current sample itself, versus two
                 while idx2 == idx1 or idx2 == sampidx:
-                    idx2 = ceil(numpy.random.rand(1)*Nlive)
+                    idx2 = numpy.ceil(numpy.random.rand(1)*(Nlive-1))[0]
 
                 # select a third index
                 while idx3 == idx1 or idx3 == idx2 or idx3 == sampidx:
-                    idx3 = ceil(numpy.random.rand(1)*Nlive)
+                    idx3 = numpy.ceil(numpy.random.rand(1)*(Nlive-1))[0]
 
                 # select the points corresponding to the indices
                 A = livepoints[idx1,:]
@@ -264,7 +275,7 @@ def draw_mcmc(livepoints, cholmat, logLmin,
                     # else it just leaves the sample dimension alone
 
             # check if sample is within prior boundaries
-            sampletmp = reflectbounds(sampletemp, par_range)
+            sampletmp = reflectbounds(sampletmp, prior_bounds)
             newPrior = prior(sampletmp)
             # Now implement the Metropolis-Hastings rejection step, to keep
             # the random walk Markovian. This ensures that even though we use
@@ -293,7 +304,7 @@ def draw_mcmc(livepoints, cholmat, logLmin,
             #
             # get the likelihood of the new sample
 
-            logLnew = likelihood(x, data);
+            logLnew = likelihood(sampletmp, data);
 
             # if logLnew is greater than logLmin accept point
             if logLnew > logLmin:
@@ -409,7 +420,7 @@ def logplus(logx, logy):
 #
 # I just ported this to Numpy below:
 
-def mchol(G):
+def mchol_orig(G):
     # n gives the size of the matrix
     n = G.shape[0]
 
@@ -452,7 +463,10 @@ def mchol(G):
         if (j >= 2):
             if j < n:
                 print 'in: %s' % C[ee,j]
-                print 'out: %s' % numpy.transpose(G[ee,j]-(L[j,bb]*numpy.transpose(C[ee,bb])))
+                print 'shape %s' % G[ee,j].shape
+                print 'shae 2 %s' % L[j,bb].shape
+                print 'shape 3 %s' % C[j:n:1,0:j-1:1].T
+                print 'out: %s' % numpy.transpose(G[j:n:1,j]-(L[j,0:j-1:1]*numpy.transpose(C[j:n:1,0:j-1:1])))
                 C[ee,j] = numpy.transpose(G[ee,j]-(L[j,bb]*numpy.transpose(C[ee,bb])))
         else:
             C[ee,j] = G[ee,j]
@@ -478,6 +492,101 @@ def mchol(G):
         for i in range(0,n-1):
             L[i,i] = 1
     return (L, D)
+
+
+#
+
+
+# The following modified Cholesky code is based on some MATLAB code from
+# M. Overton, <overton@cs.nyu.edu>, translated into Python by D. Christle.
+def mchol(G):
+    if numpy.sum(numpy.abs(G-G.T)) > 0:
+        print 'Matrix G is not symmetric'
+        return -1
+
+    # define machine epsilon as eps
+    eps = 1e-15
+    n = int(G.shape[0])
+##    print 'n is %s' % n
+    diagG = numpy.diag(G)
+    gamma = numpy.max(numpy.abs(diagG))
+    xi = numpy.max(G - numpy.diag(numpy.diag(G)))
+    delta = eps*(numpy.max(numpy.array([gamma+xi,1])))
+    beta = numpy.sqrt(numpy.max(numpy.array([gamma,xi/n,eps])))
+    indef = 0
+
+    # initialize d and L
+    d = numpy.zeros((n,1),dtype=float)
+    # no sparse identity, just dense
+    L = numpy.eye(n)
+    for j in numpy.arange(0,n):
+        K = numpy.arange(0,j)
+        if j > 0:
+##            print 'n is %s' % n
+##            print 'j is %s' % j
+##            print 'K is %s' % K
+##            print 'size of L is %s' % L.shape[0]
+##            print 'other size of L is %s' % L.shape[1]
+##            print 'size of d is %s' % d.shape[0]
+##            print 'other size of d is %s' % d.shape[1]
+            djtemp = G[j,j] - numpy.dot(L[j,K],(d[K,0]*L[j,K].T)) # C[I,j] in book
+        else: # this is necessary for the first iteration, since K is empty
+            djtemp = G[j,j]
+        if j < n-1:
+##            print 'j is: %s' % j
+            I = numpy.arange(j+1,n)
+
+            #print 'I is: %s' % I
+            #print 'K is: %s' % K
+            #print 'G %s by %s' % (G.shape[0], G.shape[1])
+            if j > 0:
+##                print 'Gij is %s' % G[I,j].shape[0]
+                #print 'Lik %s' % (L[I,K].shape[0])
+                #print 'LjK %s' % (L[j,K].shape[0])
+                #print 'dk0 %s' % d[K,0].shape[0]
+                #print 'dk0Ljk %s' % (d[K,0]*L[j,K].T).shape[0]
+                if L[j,K].shape[0] == 1:
+                    Ccol = G[I,j] - L[I,K]*(d[K,0]*L[j,K].T)
+                else:
+##                    print I.shape
+##                    print K.shape
+##                    print I
+##                    print K
+##                    #print '%s' % L[I][:,K]
+##                    print d[K,0].shape
+##                    print L[j,K].T.shape
+##                    print L[I][:,K].shape
+                    #temp = numpy.dot(L[I][:,K],(d[K,0]*L[j][K].T))
+
+                    Ccol = G[I,j] - numpy.dot(L[I][:,K],(d[K,0]*L[j,K].T)) # C[I,j] in book
+            else: # again, this is a correction from the MATLAB version
+                Ccol = G[I,j]
+            theta = numpy.max(numpy.abs(Ccol))
+            # guarantees d[j] not too small and L[I,j] not too big
+            # in sufficiently positive definite case, d[j] = djtemp
+            d[j] = numpy.max(numpy.array([numpy.abs(djtemp),
+                numpy.power((theta/beta),2), delta]))
+##            print 'ccol %s' % Ccol
+##            print 'dj %s' % d[j]
+##            print 'div %s' % numpy.divide(Ccol,d[j]).shape[0]
+##            print 'Lij is %s' % L[I,j]
+##            print 'Lij shape is %s' % L[I,j].shape[0]
+            L[I,j] = numpy.divide(Ccol,d[j])
+
+        else:
+            d[j] = numpy.max(numpy.array([numpy.abs(djtemp), delta]))
+
+        if d[j] > djtemp: # G was not sufficiently positive definite
+            indef = 1
+
+    for j in numpy.arange(0,n):
+        L[:,j] = L[:,j]*numpy.sqrt(d[j])
+    #L = numpy.dot(L,numpy.diag(numpy.sqrt(d)))
+
+    R = L.T
+    E = G - numpy.dot(R.T,R)
+    return (R, indef, E)
+
 
 
 

@@ -21,8 +21,9 @@ def main():
 
     Nlive = 500
     Nmcmc = 20
-    PyNest.nested_sampler(data, Nlive, Nmcmc, tolerance, sin_likelihood, sin_prior_function, sin_pr_draw, 2)
-def sin_pr_draw(Npoints):
+    maxIter = 5000
+    PyNest.nested_sampler(data, Nlive, maxIter, Nmcmc, tolerance, sin_likelihood, sin_prior_function, sin_pr_draw, prior_bnds, 2)
+def sin_pr_draw(Npoints,D):
     output = numpy.random.rand(Npoints,2)
     return output
 

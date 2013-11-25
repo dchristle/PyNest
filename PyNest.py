@@ -11,14 +11,14 @@
 import numpy
 
 def nested_sampler(data, Nlive, Nmcmc, tolerance, likelihood,
-    model, prior, priordraw, extraparams, D):
+    prior, priordraw, D):
     # Nmcmc cannot be zero, for this initial code, since we always use MCMC
     # sampling and not the ellipse-based sampling, for the initial port of this
     # code from Matlab Multinest. This is just simpler for now and faster to
     # write if we omit features.
 
     # Get the number of parameters from the prior array
-    D = prior.shape[0]
+    #D = prior.shape[0]
 
     # Skip getting parameter names... not sure if that's useful for this code.
 
@@ -33,7 +33,7 @@ def nested_sampler(data, Nlive, Nmcmc, tolerance, likelihood,
     # calculate the log likelihood of all the live points
     logL = numpy.zeros(Nlive)
     for i in range(0,Nlive-1):
-        logL[i] = likelihood(Nlive[i])
+        logL[i] = likelihood(livepoints[i],data)
 
     # don't scale parameters - don't see the reason quite yet
 

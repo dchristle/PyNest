@@ -256,7 +256,13 @@ def draw_mcmc(livepoints, cholmat, logLmin,
                 C = livepoints[idx3,:]
 
                 # Define differential evolution constants
-                F = 1.2     # F = 1.2 stretches the distribution of points on avg
+
+                # We implement here dithering of the scale factor in DE
+                Fl = 0.4
+                Fh = 1.6
+                F = Fl + numpy.random.rand(1)*(Fh-Fl)
+
+                # Take standard CR of 0.9
                 CR = 0.9    # Crossover probability for each dimension
 
                 # Now iterate through the dimensions and figure out whether or

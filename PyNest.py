@@ -32,8 +32,8 @@ def nested_sampler(data, Nlive, maxIter, Nmcmc, tolerance, likelihood,
     livepoints = priordraw(Nlive,D)
 
     # calculate the log likelihood of all the live points
-    logL = numpy.zeros(Nlive)
-    for i in range(0,Nlive-1):
+    logL = numpy.zeros((Nlive,1))
+    for i in numpy.arange(0,Nlive):
         logL[i] = likelihood(livepoints[i],data)
 
     # don't scale parameters - don't see the reason quite yet
@@ -42,13 +42,13 @@ def nested_sampler(data, Nlive, maxIter, Nmcmc, tolerance, likelihood,
     tol = numpy.inf
 
     # initial width of prior volume (from X_0 = 1 to X_1 = exp(-1/N))
-    logw = numpy.log(1 - numpy.exp(-1/Nlive))
+    logw = numpy.log(1 - numpy.exp(-1.0/Nlive))
 
     # initial log evidence (Z=0)
     logZ = -numpy.inf
 
     # initial information
-    H = 0
+    H = 0.0
 
     # initialize array of samples for posterior
     nest_samples = numpy.zeros((maxIter,D+1),float)
@@ -61,7 +61,7 @@ def nested_sampler(data, Nlive, maxIter, Nmcmc, tolerance, likelihood,
     # implemented
     h = 1.1 # h values from bottom of p. 1605 of Feroz and Hobson
     FS = h # start FS at h, so ellipsoidal partitioning is done first time
-    K = 1 # start with one cluster of live points
+    K = 1.0 # start with one cluster of live points
 
     # get maximum likleihood
     logLmax = numpy.max(logL)
@@ -70,7 +70,7 @@ def nested_sampler(data, Nlive, maxIter, Nmcmc, tolerance, likelihood,
     j = 1
 
     # MAIN LOOP
-    while (tol > tolerance) or (j <= maxIter):
+    while (tol > tolerance) and (j <= maxIter):
 
         # expected value of true remaining prior volume X
         VS = numpy.exp(-j/Nlive)
@@ -79,10 +79,7 @@ def nested_sampler(data, Nlive, maxIter, Nmcmc, tolerance, likelihood,
 
         logLmin = numpy.min(logL)
         min_idx = numpy.argmin(logL)
-        print 'min idx = %s' % min_idx
         # set the sample to the minimum value
-        print 'sample minimum value is %s , log %s' % (livepoints[min_idx,:], logLmin)
-        print 'j is %s' % j
         nest_samples[j,:] = numpy.append(livepoints[min_idx,:], logLmin)
         # get the log weight (Wt = L*w)
         logWt = logLmin + logw
@@ -92,11 +89,12 @@ def nested_sampler(data, Nlive, maxIter, Nmcmc, tolerance, likelihood,
         Hold = H
 
         # update evidence, information, and width
-        logZ = logplus(logZ, logWt)
-        H = numpy.exp(logWt - logZ)*logLmin + \
-            numpy.exp(logZold - logZ)*(Hold + logZold) - logZ
+        logZnew = logplus(logZ, logWt) # modified to make more like mininest.py
+        H = numpy.exp(logWt - logZnew)*logLmin + \
+            numpy.exp(logZ - logZnew)*(Hold + logZ) - logZnew
+        logZ = logZnew.copy()
         # logw = logw - logt(Nlive) -- this comment leftover from Pitkin
-        logw = logw - 1/Nlive
+        logw = float(logw) - 1.0/float(Nlive)
 
         if Nmcmc > 0:
             # do MCMC nested sampling -- this is the only option implemented
@@ -104,11 +102,11 @@ def nested_sampler(data, Nlive, maxIter, Nmcmc, tolerance, likelihood,
 
             # get the Cholesky decomposed covariance of the live points
             # (do every 100th iteration, can change this if required)
-            if j-1 % 100 == 0:
+            if (j-1 % 100) == 0:
                 # NOTE that for numbers of parameters >~10 covariances are often
                 # not positive definite and cholcov will have "problems".
                 # cholmat = cholcov(propscale*cov(livepoints) -- original code
-                print 'np cov %s' % numpy.cov(livepoints)
+
                 #cholmat = numpy.linalg.cholesky(propscale*numpy.cov(livepoints))
                 # use modified Cholesky decomposition, which works even for
                 # matrices that are not quite positive definite from:
@@ -116,14 +114,9 @@ def nested_sampler(data, Nlive, maxIter, Nmcmc, tolerance, likelihood,
                 # (via http://stats.stackexchange.com/questions/6364
                 # /making-square-root-of-covariance-matrix-positive-definite-matlab
                 cv = numpy.cov(livepoints.T)
-                print 'livepoints'
-                print livepoints.shape
-                print 'cv'
-                print cv.shape
                 l, indef, e = mchol(propscale*cv)
-                print l
 
-                cholmat = l #numpy.transpose(l)*scipy.linalg.sqrtm(d)
+                cholmat = l
 
         # draw a new sample using mcmc algorithm
             point_draw, logL_draw = draw_mcmc(livepoints, cholmat, logLmin, \
@@ -136,27 +129,34 @@ def nested_sampler(data, Nlive, maxIter, Nmcmc, tolerance, likelihood,
 
         # Now update maximum likelihood if appropriate
         if logL[min_idx] > logLmax:
-            logLmax = logL[min_idx].copy()
+            logLmax = logL[min_idx]
+        logLmax = numpy.max(logL)
+
 
 
         # Work out tolerance for stopping criterion
-        # I don't understand this tolerance, so I commented it out:
-        tol = logplus(logZ, logLmax - (j/Nlive)) - logZ
-
-        # Instead, let's do a basic tolerance that the last increment was below
-        # the value tol:
-        #tol = numpy.abs(logWt*2)
+        # This tolerance is essentially calculating:
+        #
+        # log( (L_max * exp(-j/Nlive) + Z) / Z )
+        #
+        # The quantity L_max * exp(-j/Nlive) is an estimate of
+        # the maximum change in Z that could occur, given the
+        # remaining points' likelihoods and the remaining prior
+        # volume.
+        tol = logplus(logZ, logLmax - (float(j)/float(Nlive))) - logZ
 
 
 
         # Display progress
-        print 'log(Z): %.5e, tol = %.5e, K = %d, iteration = %d' % (logZ, tol,
-            K, j)
+        if (j % 50) == 0:
+            print 'log(Z): %.5e, tol = %.5e, K = %d, iteration = %d' % (logZ, tol,
+                K, j)
         # update counter
         j = j+1
     # Sort the remaining points (in order of likelihood) and add them on to the
     # evidence
     logL_sorted_args = numpy.argsort(logL)
+    logL_sorted = numpy.sort(logL)
     livepoints_sorted = livepoints[logL_sorted_args,:]
 
     for i in range(0,Nlive-1):
@@ -174,7 +174,7 @@ def nest2pos(nest_samples, Nlive):
     N = nest_samples.shape[0]
     Ncol = nest_samples.shape[1]
 
-    # calulcate logWt = log(L*w) = logL + logw = logL - i/Nlive
+    # calculate logWt = log(L*w) = logL + logw = logL - i/Nlive
     logL = nest_samples[:,Ncol-1]
     logw = -numpy.append(numpy.array(numpy.transpose(numpy.array(range(1,N-Nlive)))),
         (N-Nlive)*numpy.ones((Nlive,1))/Nlive)
@@ -201,7 +201,7 @@ def draw_mcmc(livepoints, cholmat, logLmin,
     Ndegs = 2 # student's t distribution number of degrees of freedom
 
     # initialize counters
-    acctot = 0
+    acctot = 0.0
     Ntimes = 1
 
     while True:
@@ -212,14 +212,7 @@ def draw_mcmc(livepoints, cholmat, logLmin,
         sample = livepoints[sampidx[0],:]
 
         # get the sample prior
-        # replace this later -- it should compute the prior at the location of
-        # "sample"; probably most general to have the user pass a function that
-        # we can evalute here to do this.
-        p_ub = 10
-        p_lb = 0
-        currentPrior = -numpy.log(p_ub - p_lb)
-        # In fact, let's just write out the code relying on lambda. This 'prior'
-        # function should actually return the natural logarithm of the prior.
+
         currentPrior = prior(sample)
 
         for i in range(0,Nmcmc-1):
@@ -323,7 +316,7 @@ def draw_mcmc(livepoints, cholmat, logLmin,
         Ntimes = Ntimes + 1
         # while loop ends here.
 
-
+    #print 'Acceptance ratio: %1.4f, ' % (float(acctot)/(float(Ntimes)*float(Nmcmc)))
     return (sample, logL)
 
 def reflectbounds(new, par_range):
@@ -365,9 +358,9 @@ def logplus(logx, logy):
 
 
     if logx > logy:
-        logz = logx+numpy.log(1.+numpy.exp(logy-logx));
+        logz = logx+numpy.log(1.0+numpy.exp(logy-logx))
     else:
-        logz = logy+numpy.log(1.+numpy.exp(logx-logy));
+        logz = logy+numpy.log(1.0+numpy.exp(logx-logy))
 
 
     return logz
